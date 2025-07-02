@@ -1,7 +1,7 @@
 # dynamic_voice_stop
 
 ## 概要
-Claude Code の Stop フックとして動作し、アシスタントの最新回答テキストを VOICEVOX ENGINE を通じて音声合成し、macOS の `afplay` で再生する Bash スクリプト `claude_hooks/dynamic_voice_stop.sh` を提供します。音声で内容を確認したい場合に便利です。
+Claude Code の Stop フックとして動作し、アシスタントの最新回答テキストを VOICEVOX ENGINE を通じて音声合成し、macOS の `afplay` で再生する Bash スクリプト `hooks/dynamic_voice_stop.sh` を提供します。音声で内容を確認したい場合に便利です。
 
 ## 特長
 - VOICEVOX ENGINE (デフォルト http://127.0.0.1:50021) と連携し高品質な日本語音声を生成
@@ -34,7 +34,7 @@ cd dynamic_voice_stop
 Claude Code プロジェクトに組み込む場合は、次のように `.claude/hooks` へリンクまたはコピーしてください。
 ```bash
 mkdir -p ~/.claude/hooks
-ln -s "$(pwd)/claude_hooks/dynamic_voice_stop.sh" ~/.claude/hooks/dynamic_voice_stop.sh
+ln -s "$(pwd)/hooks/dynamic_voice_stop.sh" ~/.claude/hooks/dynamic_voice_stop.sh
 ```
 
 ## 使い方
@@ -63,10 +63,10 @@ ln -s "$(pwd)/claude_hooks/dynamic_voice_stop.sh" ~/.claude/hooks/dynamic_voice_
 ### 手動実行・設定変更
 ```bash
 # 対話型設定ウィザード
-bash claude_hooks/dynamic_voice_stop.sh config
+bash hooks/dynamic_voice_stop.sh config
 
 # JSON で設定コマンドを直接渡す例 (全文読み上げへ変更)
-echo '{"config_command":"mode_full"}' | bash claude_hooks/dynamic_voice_stop.sh
+echo '{"config_command":"mode_full"}' | bash hooks/dynamic_voice_stop.sh
 ```
 
 ## 主な設定変数
@@ -83,7 +83,7 @@ echo '{"config_command":"mode_full"}' | bash claude_hooks/dynamic_voice_stop.sh
 ## テスト方法
 VOICEVOX ENGINE を起動後、任意のテキストを読み上げる例:
 ```bash
-echo '{"transcript_path":"/path/to/transcript.jsonl"}' | bash claude_hooks/dynamic_voice_stop.sh
+echo '{"transcript_path":"/path/to/transcript.jsonl"}' | bash hooks/dynamic_voice_stop.sh
 ```
 (実運用では Claude Code が自動で `transcript_path` を渡すため、手動入力は不要です。)
 
