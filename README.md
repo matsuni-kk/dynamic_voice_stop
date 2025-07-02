@@ -44,7 +44,17 @@ ln -s "$(pwd)/claude_hooks/dynamic_voice_stop.sh" ~/.claude/hooks/dynamic_voice_
    ```json
    {
      "hooks": {
-       "stop": ".claude/hooks/dynamic_voice_stop.sh"
+       "Stop": [
+         {
+           "matcher": "",
+           "hooks": [
+             {
+               "type": "command",
+               "command": ".claude/hooks/dynamic_voice_stop.sh"
+             }
+           ]
+         }
+       ]
      }
    }
    ```
