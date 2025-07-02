@@ -40,7 +40,7 @@ ln -s "$(pwd)/hooks/dynamic_voice_stop.sh" ~/.claude/hooks/dynamic_voice_stop.sh
 ## 使い方
 ### Claude Code Stop フックとして
 1. `.claude/hooks/dynamic_voice_stop.sh` が存在することを確認
-2. Claude Code の設定 (例: `project.json`) に Stop フックを登録
+2. Claude Code の設定 (例: `settings.local.json`) に Stop フックを登録
    ```json
    {
      "hooks": {
