@@ -4,10 +4,11 @@
 # ========================================
 # 
 # 概要: Claude Codeの Stop フックで呼び出され、最後のアシスタント回答を
-#       VOICEVOXを使って音声で読み上げるスクリプト
+#       VOICEVOX または AivisSpeech を使って音声で読み上げるスクリプト
 #
 # 依存関係:
-#   - VOICEVOX ENGINE (http://127.0.0.1:50021)
+#   - VOICEVOX ENGINE (http://127.0.0.1:50021) または
+#   - AivisSpeech (http://127.0.0.1:10101)
 #   - jq (JSON解析)
 #   - afplay (macOS音声再生)
 #   - curl (HTTP通信)
@@ -16,7 +17,9 @@
 #   - UUID_MODE: UUID検索モード (true=全コンテンツ/false=軽量)
 #   - READING_MODE: 読み上げ範囲 (first_line/after_first/full_text/char_limit)
 #   - MAX_CHARS: 文字数制限値
-#   - speaker: VOICEVOXの話者ID
+#   - ENGINE_PRIORITY: エンジン優先順位 (voicevox/aivisspeech)
+#   - VOICEVOX_SPEAKER: VOICEVOXの話者ID
+#   - AIVISSPEECH_SPEAKER: AivisSpeechの話者ID
 #
 # 使用方法:
 #   - Claude Code の Stop フックとして自動実行
@@ -28,7 +31,16 @@
 # スクリプト実行設定
 set -e                        # エラー発生時に即座に終了
 read -r json || json="{}"     # stdin からJSONを読み取り（失敗時はデフォルト値）
-speaker=47                    # VOICEVOX話者ID（ナースロボ＿タイプT）
+
+# 音声エンジン設定
+ENGINE_PRIORITY="voicevox"    # エンジン優先順位（voicevox/aivisspeech）
+VOICEVOX_SPEAKER=47          # VOICEVOX話者ID（ナースロボ＿タイプT）
+AIVISSPEECH_SPEAKER=888753760  # AivisSpeech話者ID（Anneli ノーマル）
+# 利用可能なAivisSpeech話者ID:
+# 888753760=Anneli ノーマル, 888753761=Anneli 通常, 888753762=Anneli テンション高め
+# 888753763=Anneli 落ち着き, 888753764=Anneli 上機嫌, 888753765=Anneli 怒り・悲しみ
+# 606865152=fumifumi, 933744512=peach, 706073888=white
+# 1431611904=まい, 376644064=桜音, 1325133120=花音
 
 # ========================================
 # 設定変更コマンド処理（オプション機能）
@@ -56,9 +68,10 @@ if [[ $# -gt 0 ]]; then
             echo "2) 読み上げモード変更"
             echo "3) 行数制限値変更"
             echo "4) 文字数制限値変更"
-            echo "5) 設定確認のみ"
-            echo "6) 終了"
-            read -p "選択 (1-6): " choice
+            echo "5) 音声エンジン優先順位変更"
+            echo "6) 設定確認のみ"
+            echo "7) 終了"
+            read -p "選択 (1-7): " choice
             
             case $choice in
                 1)
@@ -109,10 +122,21 @@ if [[ $# -gt 0 ]]; then
                     fi
                     ;;
                 5)
-                    echo "📊 詳細設定:"
-                    grep -E "^(UUID_MODE|READING_MODE|MAX_CHARS|MAX_LINES)=" "$0"
+                    echo "音声エンジン優先順位を選択:"
+                    echo "a) VOICEVOX優先 (推奨)"
+                    echo "b) AivisSpeech優先"
+                    read -p "選択 (a-b): " engine_choice
+                    case $engine_choice in
+                        a) sed -i '' 's/^ENGINE_PRIORITY=.*/ENGINE_PRIORITY="voicevox"/' "$0"; echo "✅ VOICEVOX優先" ;;
+                        b) sed -i '' 's/^ENGINE_PRIORITY=.*/ENGINE_PRIORITY="aivisspeech"/' "$0"; echo "✅ AivisSpeech優先" ;;
+                        *) echo "❌ 無効な選択" ;;
+                    esac
                     ;;
                 6)
+                    echo "📊 詳細設定:"
+                    grep -E "^(UUID_MODE|READING_MODE|MAX_CHARS|MAX_LINES|ENGINE_PRIORITY)=" "$0"
+                    ;;
+                7)
                     echo "👋 終了"
                     ;;
                 *)
@@ -162,10 +186,20 @@ if [[ -n "$config_command" ]]; then
             sed -i '' 's/^READING_MODE=.*/READING_MODE="char_limit"/' "$0"
             echo "✅ 読み上げモード: 文字数制限" >&2
             exit 0 ;;
+        "engine_voicevox")
+            # 音声エンジンをVOICEVOXに設定
+            sed -i '' 's/^ENGINE_PRIORITY=.*/ENGINE_PRIORITY="voicevox"/' "$0"
+            echo "✅ 音声エンジン優先順位: VOICEVOX" >&2
+            exit 0 ;;
+        "engine_aivisspeech")
+            # 音声エンジンをAivisSpeechに設定
+            sed -i '' 's/^ENGINE_PRIORITY=.*/ENGINE_PRIORITY="aivisspeech"/' "$0"
+            echo "✅ 音声エンジン優先順位: AivisSpeech" >&2
+            exit 0 ;;
         "show_config")
             # 現在の設定を表示
             echo "📊 現在の設定:" >&2
-            grep -E "^(UUID_MODE|READING_MODE|MAX_CHARS|MAX_LINES)=" "$0" >&2
+            grep -E "^(UUID_MODE|READING_MODE|MAX_CHARS|MAX_LINES|ENGINE_PRIORITY)=" "$0" >&2
             exit 0 ;;
     esac
 fi
@@ -334,66 +368,135 @@ echo "🔧 処理後テキスト長: ${#text}文字" >> /tmp/voicestop_debug.log
 echo "📢 読み上げテキスト: $text" >&2
 
 # ========================================
-# ⑤ VOICEVOX ENGINE 接続確認
+# ⑤ 音声エンジン検出・接続確認
 # ========================================
 # 
-# VOICEVOX ENGINE が起動しているかチェック
-# ポート 50021 で /version エンドポイントへの接続を確認
+# 利用可能な音声エンジンを検出し、優先順位に従って使用するエンジンを決定
+# VOICEVOX ENGINE (port 50021) または AivisSpeech (port 10101)
 #
-if ! curl -s "http://127.0.0.1:50021/version" >/dev/null 2>&1; then
-    echo "⚠️ VOICEVOX ENGINE が起動していません (http://127.0.0.1:50021)" >&2
-    echo "VOICEVOXアプリを起動してから再実行してください" >&2
-    exit 0  # 非ブロッキング終了（サービス未起動は正常ケース）
+
+# 音声エンジンの検出
+voicevox_available=false
+aivisspeech_available=false
+
+if curl -s "http://127.0.0.1:50021/version" >/dev/null 2>&1; then
+    voicevox_available=true
+    echo "🔧 VOICEVOX ENGINE が利用可能です" >> /tmp/voicestop_debug.log
+fi
+
+if curl -s "http://127.0.0.1:10101/speakers" >/dev/null 2>&1; then
+    aivisspeech_available=true
+    echo "🔧 AivisSpeech が利用可能です" >> /tmp/voicestop_debug.log
+fi
+
+# 使用するエンジンの決定
+selected_engine=""
+if [[ "$ENGINE_PRIORITY" == "voicevox" ]]; then
+    if $voicevox_available; then
+        selected_engine="voicevox"
+    elif $aivisspeech_available; then
+        selected_engine="aivisspeech"
+    fi
+else
+    if $aivisspeech_available; then
+        selected_engine="aivisspeech"
+    elif $voicevox_available; then
+        selected_engine="voicevox"
+    fi
+fi
+
+if [[ -z "$selected_engine" ]]; then
+    echo "⚠️ 利用可能な音声エンジンが見つかりません" >&2
+    echo "VOICEVOX ENGINE (http://127.0.0.1:50021) または AivisSpeech (http://127.0.0.1:10101) を起動してください" >&2
+    exit 0
+fi
+
+echo "🔧 使用する音声エンジン: $selected_engine" >> /tmp/voicestop_debug.log
+
+# ========================================
+# ⑥ 音声合成実行
+# ========================================
+# 
+# 選択されたエンジンに応じて音声合成を実行
+#
+
+wave_file=$(mktemp).wav
+
+if [[ "$selected_engine" == "voicevox" ]]; then
+    # VOICEVOX ENGINE を使用した音声合成
+    echo "🔧 VOICEVOX ENGINEで音声合成を実行" >> /tmp/voicestop_debug.log
+    
+    # 音声クエリ生成
+    query_json=$(mktemp)
+    if ! curl -s -X POST "http://127.0.0.1:50021/audio_query?speaker=$VOICEVOX_SPEAKER" \
+         --get --data-urlencode "text=$text" -o "$query_json"; then
+        echo "⚠️ VOICEVOX ENGINE へのクエリ生成に失敗しました" >&2
+        rm -f "$query_json"
+        exit 0
+    fi
+    
+    # 音声合成
+    if ! curl -s -H 'Content-Type: application/json' \
+         -d @"$query_json" \
+         "http://127.0.0.1:50021/synthesis?speaker=$VOICEVOX_SPEAKER" -o "$wave_file"; then
+        echo "⚠️ VOICEVOX ENGINE での音声合成に失敗しました" >&2
+        rm -f "$query_json" "$wave_file"
+        exit 0
+    fi
+    
+    rm -f "$query_json"
+    
+elif [[ "$selected_engine" == "aivisspeech" ]]; then
+    # AivisSpeech を使用した音声合成
+    echo "🔧 AivisSpeechで音声合成を実行" >> /tmp/voicestop_debug.log
+    
+    # 利用可能な話者を確認
+    echo "🔧 AivisSpeech 話者ID: $AIVISSPEECH_SPEAKER" >> /tmp/voicestop_debug.log
+    
+    # 話者リストをログに出力（デバッグ用）
+    available_speakers=$(curl -s "http://127.0.0.1:10101/speakers" 2>/dev/null)
+    if [[ -n "$available_speakers" ]]; then
+        echo "🔧 利用可能な話者: $available_speakers" >> /tmp/voicestop_debug.log
+    fi
+    
+    # AivisSpeech API呼び出し（VOICEVOX互換形式）
+    query_json=$(mktemp)
+    if ! curl -s -X POST "http://127.0.0.1:10101/audio_query?speaker=$AIVISSPEECH_SPEAKER" \
+         --get --data-urlencode "text=$text" -o "$query_json"; then
+        echo "⚠️ AivisSpeech へのクエリ生成に失敗しました" >&2
+        rm -f "$query_json"
+        exit 0
+    fi
+    
+    # 音声合成
+    if ! curl -s -H 'Content-Type: application/json' \
+         -d @"$query_json" \
+         "http://127.0.0.1:10101/synthesis?speaker=$AIVISSPEECH_SPEAKER" -o "$wave_file"; then
+        echo "⚠️ AivisSpeech での音声合成に失敗しました" >&2
+        rm -f "$query_json" "$wave_file"
+        exit 0
+    fi
+    
+    rm -f "$query_json"
 fi
 
 # ========================================
-# ⑥ VOICEVOX ENGINE へ音声クエリ生成
-# ========================================
-# 
-# テキストと話者IDを指定して音声合成用のクエリを生成
-# 生成されたクエリJSONは次のステップで音声合成に使用
-#
-query_json=$(mktemp)  # 一時ファイル作成
-if ! curl -s -X POST "http://127.0.0.1:50021/audio_query?speaker=$speaker" \
-     --get --data-urlencode "text=$text" -o "$query_json"; then
-    echo "⚠️ VOICEVOX ENGINE へのクエリ生成に失敗しました" >&2
-    rm -f "$query_json"  # 一時ファイル削除
-    exit 0  # 非ブロッキング終了
-fi
-
-# ========================================
-# ⑦ 音声合成実行
-# ========================================
-# 
-# 生成されたクエリJSONを使用して実際の音声ファイル（WAV形式）を生成
-# 合成された音声データは一時ファイルに保存
-#
-wave_file=$(mktemp).wav  # 音声ファイル用一時ファイル作成
-if ! curl -s -H 'Content-Type: application/json' \
-     -d @"$query_json" \
-     "http://127.0.0.1:50021/synthesis?speaker=$speaker" -o "$wave_file"; then
-    echo "⚠️ 音声合成に失敗しました" >&2
-    rm -f "$query_json" "$wave_file"  # 一時ファイル削除
-    exit 0  # 非ブロッキング終了
-fi
-
-# ========================================
-# ⑧ 音声ファイル再生
+# ⑦ 音声ファイル再生
 # ========================================
 # 
 # 生成された音声ファイルをmacOS標準のafplayコマンドで再生
 # バックグラウンド実行で非同期再生、一定時間後に一時ファイルを自動削除
 #
 if command -v afplay >/dev/null 2>&1; then
-    echo "🔊 音声を再生中..." >&2
+    echo "🔊 音声を再生中... (Engine: $selected_engine)" >&2
     afplay "$wave_file" &  # バックグラウンドで再生開始
     
     # 10秒後に一時ファイルを削除（バックグラウンドで実行）
-    (sleep 10; rm -f "$query_json" "$wave_file") &
+    (sleep 10; rm -f "$wave_file") &
 else
     # afplayコマンドが見つからない場合（通常はmacOSなら存在する）
     echo "⚠️ afplayコマンドが見つかりません（macOS標準のはずですが...）" >&2
-    rm -f "$query_json" "$wave_file"  # 一時ファイル削除
+    rm -f "$wave_file"  # 一時ファイル削除
     exit 0  # 非ブロッキング終了
 fi
 
